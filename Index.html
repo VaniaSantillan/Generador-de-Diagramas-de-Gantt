@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagramas de Gantt</title>
+
+    <!-- FUENTES -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <!-- LIBRERÍAS -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <!-- ESTILOS Y SCRIPT -->
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+
+    <!-- CONTENEDOR PRINCIPAL -->
+    <div class="container">
+
+        <!-- Controles Superiores -->
+        <header class="controls">
+            <div class="main-actions">
+                <div class="upload-group">
+                    <input type="file" id="csv-file" accept=".csv" class="hidden-input">
+                    <label for="csv-file" class="btn-template">
+                        Subir Archivo CSV
+                    </label>
+                    <span id="file-name" class="file-name-display">
+                        Ningún archivo seleccionado
+                    </span>
+                </div>
+            </div>
+            <!-- BOTÓN BORRAR -->
+            <button class="btn-delete-project" onclick="clearProject()">
+                Borrar proyecto
+            </button>
+        </header>
+
+        <!-- Diagrama y Tabla -->
+        <main id="canvas">
+            <h1 class="chart-title">Cronograma de Actividades</h1>
+            <div id="gantt-wrapper">
+                <div id="table-container"></div>
+                <div id="gantt-scroll">
+                    <div id="gantt-container"></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- TOOLTIP -->
+        <div id="tooltip" class="tooltip"></div>
+    </div>
+
+    <!-- EDITOR DE TAREAS -->
+    <div id="task-editor" class="task-editor hidden">
+        <div class="task-editor-header">
+            <h3>Editar tarea</h3>
+            <button type="button" class="close-btn" onclick="closeTaskEditor()">✕</button>
+        </div>
+        
+        <div class="editor-body">
+            <!-- Información de la tarea -->
+            <label for="edit-task">Tarea</label>
+            <input type="text" id="edit-task" placeholder="Nombre de la tarea">
+
+            <!-- Fechas -->
+            <label>Inicio</label>
+            <div class="date-group">
+                <input id="edit-start-day" type="text" inputmode="numeric" maxlength="2" placeholder="DD">
+                <span>/</span>
+                <input id="edit-start-month" type="text" inputmode="numeric" maxlength="2" placeholder="MM">
+                <span>/</span>
+                <input id="edit-start-year" type="text" inputmode="numeric" maxlength="4" placeholder="AAAA">
+            </div>
+
+            <label>Fin</label>
+            <div class="date-group">
+                <input id="edit-end-day" type="text" inputmode="numeric" maxlength="2" placeholder="DD">
+                <span>/</span>
+                <input id="edit-end-month" type="text" inputmode="numeric" maxlength="2" placeholder="MM">
+                <span>/</span>
+                <input id="edit-end-year" type="text" inputmode="numeric" maxlength="4" placeholder="AAAA">
+            </div>
+
+            <!-- Responsable -->
+            <label for="edit-responsable">Responsable</label>
+            <input type="text" id="edit-responsable">
+
+            <!-- Estado -->
+            <label for="edit-estado">Estado</label>
+            <select id="edit-estado">
+                <option value="Pendiente">Pendiente</option>
+                <option value="En Progreso">En Progreso</option>
+                <option value="Completado">Completado</option>
+                <option value="Pausado">Pausado</option>
+            </select>
+
+            <!-- Dependencia -->
+            <label for="edit-dependencia">Dependencia</label>
+            <select id="edit-dependencia">
+                <option value="">Sin dependencia</option>
+            </select>
+
+            <!-- Botón para guardar cambios -->
+            <div class="editor-actions">
+                <button class="btn-template full-width" onclick="saveTask()">
+                    Guardar Cambios
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- MODAL DE CONFIRMACIÓN -->
+    <div id="custom-confirm" class="hidden overlay">
+        <div class="confirm-card">
+            <h3 class="confirm-title">¿Desplazar proyecto?</h3>
+            <p id="confirm-message"></p>
+            <div class="confirm-buttons">
+                <button id="btn-si">Sí, mover todo</button>
+                <button id="btn-no">No, solo esta</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE DESCARGA -->
+    <div id="export-modal" class="export-modal hidden overlay">
+        <div class="confirm-card">
+            <h3>Selecciona columnas a exportar</h3>
+            <div id="column-options">
+                <!-- Aquí tu script.js generará dinámicamente los checkboxes -->
+            </div>
+            <div class="confirm-buttons" style="margin-top: 15px;">
+                <button class="btn-template" onclick="processExport()">Confirmar y Descargar</button>
+                <button class="btn-delete-project" onclick="document.getElementById('export-modal').classList.add('hidden')">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- BOTONES FLOTANTES DE ACCIÓN (Exportación y Zoom) -->
+    <div class="floating-controls-wrapper">
+        <!-- MENÚ DE EXPORTACIÓN -->
+        <div class="dropdown floating-export">
+            <button class="dropbtn" onclick="toggleMenu(event)">
+                Exportar como...
+            </button>
+            <div class="dropdown-content">
+                <a href="#" onclick="openExportModal('png')">Imagen PNG</a>
+                <a href="#" onclick="openExportModal('jpeg')">Imagen JPG</a>
+                <a href="#" onclick="openExportModal('pdf')">Documento PDF</a>
+                <hr>
+                <a href="#" onclick="downloadCSV()">Archivo CSV (Excel)</a>
+            </div>
+        </div>
+        
+        <!-- BOTONES DE ZOOM -->
+        <div class="zoom-controls">
+            <button onclick="zoomOut()">−</button>
+            <button onclick="zoomIn()">+</button>
+        </div>
+    </div>
+    
+</body>
+</html>

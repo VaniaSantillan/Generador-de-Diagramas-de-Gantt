@@ -205,7 +205,6 @@ document.addEventListener("DOMContentLoaded", () => {
         reader.onload = function (event) {
 
             // -- Lectura y decodificación --
-
             try {
 
                 const buffer = event.target.result;
@@ -250,8 +249,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 // -- Normalización de datos --
 
-                ganttData = rawData
-                        .map((d, i) => {
+                ganttData = rawData.map((d, i) => {
 
                     const keys = 
                         Object.keys(d);
@@ -283,7 +281,18 @@ document.addEventListener("DOMContentLoaded", () => {
                     };
 
                     // -- Obtenemos el ID original del CSV --
-                    const rawId = getVal(["id"]);
+                    const rawId = getVal([
+                        "id",
+                        "no de esquema",
+                        "no. de esquema",
+                        "No. esquema",
+                        "numero de esquema",
+                        "número de esquema",
+                        "esquema",
+                        "No.",
+                        "No",
+                        "#"
+                    ]);
 
                     return {
                         
@@ -297,15 +306,18 @@ document.addEventListener("DOMContentLoaded", () => {
                         task: 
                             getVal([
                                 "tarea", 
+                                "Tarea", 
                                 "task", 
+                                "Task",
                                 "actividad"
                             ]),
                         
                         start: 
                             parseSpanishDate(
                                 getVal([
-                                    "fecha de inicio", 
-                                    "inicio", 
+                                    "fecha de inicio",
+                                    "inicio",
+                                    "fecha inicio",
                                     "start"
                                 ])
                             ),
@@ -313,9 +325,14 @@ document.addEventListener("DOMContentLoaded", () => {
                         end: 
                             parseSpanishDate(
                                 getVal([
-                                    "fecha de fin", 
-                                    "fin", 
-                                    "termino", 
+                                    "fecha de término",
+                                    "fecha de termino",
+                                    "fecha termino",
+                                    "fecha fin",
+                                    "fecha de fin",
+                                    "fin",
+                                    "termino",
+                                    "término",
                                     "end"
                                 ])
                             ),
@@ -324,14 +341,14 @@ document.addEventListener("DOMContentLoaded", () => {
                             getVal([
                                 "responsable", 
                                 "encargado"
-                            ]),
+                            ]) || "------",
 
                         estado: 
                             getVal([
                                 "estado", 
                                 "estatus", 
                                 "status"
-                            ]),
+                            ]) || "Pendiente",
 
                         dependsOn: 
                             getVal([
@@ -343,15 +360,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 })
                 
                 // -- Validacion de datos --
-
-                .filter(d =>
-                    d.task &&
-                    d.start &&
-                    d.end &&
-                    d.end >= d.start &&
-                    !isNaN(d.start.getTime()) &&
-                    !isNaN(d.end.getTime())
-                );
+                ganttData = ganttData.filter(d =>
+                    d.task &&
+                    d.start instanceof Date &&
+                    d.end instanceof Date &&
+                    !isNaN(d.start.getTime()) &&
+                    !isNaN(d.end.getTime()) &&
+                    d.end >= d.start
+                );
 
                 // -- Render y guardado --
 
@@ -582,7 +598,16 @@ function drawTable(data) {
 
     // -- Configuración base de las columnas --
     const allColumns = [
-        { key: "id", label: "ID", width: 60 },
+        {
+            key: "id",
+            label: "ID",
+            width: Math.max(
+                90,
+                d3.max(ganttData, d =>
+                    measureText(d.id || "", 14) + 25
+                )
+            )
+        },
         { key: "tarea", label: "Tarea", width: 180 },
         { key: "responsable", label: "Responsable", width: 190 },
         { key: "estado", label: "Estado", width: 130 },
@@ -1418,7 +1443,7 @@ function measureText(text, fontSize = 14) {
     const tempText = tempSvg
         .append("text")
         .style("font-size", `${fontSize}px`)
-        .style("font-family", "Raleway")
+        .style("font-family", "Arial, Helvetica, sans-serif")
         .text(text || "");
 
     const width =
@@ -1552,14 +1577,6 @@ async function generateExport(format) {
     const temp = document.createElement("div");
     temp.className = "export-temp";
     temp.innerHTML = `
-        <h1 style="
-            font-family: Raleway;
-            text-align: center;
-            margin-bottom: 20px;
-            color: #555;
-        ">
-            Cronograma de Actividades
-        </h1>
         <div id="temp-wrapper"></div>
     `;
 
@@ -1631,21 +1648,21 @@ async function generateExport(format) {
     if (activeColumns.length <= 2) {
 
         // Pocas columnas 
-        fontSize = 23;
+        fontSize = 25;
         headerFontSize = 20;
         rowHeight = 55;
 
     } else if (activeColumns.length === 3) {
 
-        fontSize = 18;
+        fontSize = 20;
         headerFontSize = 17;
         rowHeight = 45;
 
     } else {
 
         // Muchas columnas → fuente normal
-        fontSize = 15;
-        headerFontSize = 14;
+        fontSize = 17;
+        headerFontSize = 16;
         rowHeight = 40;
     }
 
@@ -1655,17 +1672,20 @@ async function generateExport(format) {
         d3ExportSvg.append("text")
             .attr("x", col.x)
             .attr("y", headerY)
-            .style("font-family", "Raleway")
+            .style("font-family", "Arial, Helvetica, sans-serif")
             .style("font-weight", "bold")
             .style("font-size", `${headerFontSize}px`)
             .style("fill", "#333")
             .text(col.label);
     });
 
-    const firstRowY = 70;
+    const firstRowY = margin.top + (y.bandwidth() / 2);
 
     ganttData.forEach((row, i) => {
-        const y = firstRowY + (i * rowHeight);
+        const rowY =
+            margin.top +
+            y(row.task) +
+            y.bandwidth() / 2;
 
         activeColumns.forEach(col => {
             let val = "";
@@ -1679,8 +1699,10 @@ async function generateExport(format) {
 
             d3ExportSvg.append("text")
                 .attr("x", col.x)
-                .attr("y", y)
-                .style("font-family", "Raleway")
+                
+                .attr("y", rowY)
+                .attr("dominant-baseline", "middle")
+                .style("font-family", "Arial, Helvetica, sans-serif")
                 .style("font-size", `${fontSize}px`)
                 .style("fill", "#555")
                 .text(val);
@@ -1717,16 +1739,66 @@ async function generateExport(format) {
         link.click();
     } 
     else if (format === "pdf") {
+
         const { jsPDF } = window.jspdf;
-        const imgData = canvas.toDataURL("image/png");
 
         const pdf = new jsPDF({
             orientation: "landscape",
             unit: "px",
-            format: [canvas.width, canvas.height]
+            format: "a4"
         });
 
-        pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+
+        const scale = pdfWidth / canvas.width;
+
+        const pageCanvas = document.createElement("canvas");
+        const pageCtx = pageCanvas.getContext("2d");
+
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = pdfHeight / scale;
+
+        let y = 0;
+        let first = true;
+
+        while (y < canvas.height) {
+
+            pageCtx.clearRect(
+                0,
+                0,
+                pageCanvas.width,
+                pageCanvas.height
+            );
+
+            pageCtx.drawImage(
+                canvas,
+                0,
+                y,
+                canvas.width,
+                pageCanvas.height,
+                0,
+                0,
+                canvas.width,
+                pageCanvas.height
+            );
+
+            if (!first)
+                pdf.addPage();
+
+            pdf.addImage(
+                pageCanvas.toDataURL("image/png"),
+                "PNG",
+                0,
+                0,
+                pdfWidth,
+                pageCanvas.height * scale
+            );
+
+            y += pageCanvas.height;
+            first = false;
+        }
+
         pdf.save(getExportFileName("pdf"));
     }
 

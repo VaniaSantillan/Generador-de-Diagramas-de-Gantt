@@ -204,7 +204,6 @@ label:focus {
 #gantt-wrapper {
     display: flex;
     width: 100%;
-    height: 650px;
     border: 1px solid #e2e8f0;
     border-radius: 10px;
     background: #fff;
@@ -224,34 +223,42 @@ label:focus {
 
     min-height: 100%; /* <-- CLAVE: Si hay pocas tareas, mantiene el fondo blanco hasta abajo */
     display: flex;
-    height: calc(100vh - 150px);     /* O "max-height: 75vh;". Fija un límite para que el scroll tenga razón de existir */
     overflow-y: auto;/* Evita que el contenedor colapse el ancho de la tabla */
 }
 
-/* Asegúrate de que el contenedor del diagrama ocupe el 100% de la altura de su padre */
+#table-scroll{
+    width:600px;
+    overflow-x:auto;
+    overflow-y:hidden;
+    flex-shrink:0;
+}
+
+#table-container{
+    width:max-content;
+    overflow-y:hidden;
+}
 #gantt-scroll{
     position: relative;
     flex: 1;
     overflow-x: auto; 
     overflow-y: hidden; 
-    height: 100%; /* <-- CLAVE: Fuerza a que mida lo mismo que el wrapper */
-    background: #ffffff; /* <-- Esto evita que se vea gris o vacío abajo */
+    height: 100%; 
+    background: #ffffff; 
 }
 
 #gantt-scroll-wrapper {
     flex-grow: 1;
-    overflow-x: auto; /* Scroll HORIZONTAL exclusivo para la línea del tiempo */
-    overflow-y: hidden; /* Bloquea el scroll vertical interno para que no duplique la barra */
+    overflow-x: auto; 
+    overflow-y: hidden; 
 }
 
 /* El contenedor del SVG debe estirarse por completo */
 #gantt-container {
-    width: auto !important;  /* ¡CLAVE! Evita que el CSS obligue al SVG a medir el 100% de la pantalla */
+    width: auto !important;  
     min-width: max-content;
-    min-height: 100%; /* <-- CLAVE: Si hay pocas tareas, mantiene el fondo blanco hasta abajo */
+    min-height: 100%;
     display: block;
-    height: calc(100vh - 150px);     /* O "max-height: 75vh;". Fija un límite para que el scroll tenga razón de existir */
-    overflow-y: auto;   /* Genera la barra vertical sólo si las tareas se pasan de los 600px */
+    overflow-y: hidden;
 }
 
 #table-container svg, 

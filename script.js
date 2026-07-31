@@ -19,6 +19,8 @@ let totalHeight = 0;
 
 // -- Estado global de la app --
 
+let exportTaskMode = "summary"; 
+
 let ganttData = [];
 let currentTask = null; 
 
@@ -137,6 +139,127 @@ function readDateFields(prefix) {
     }
 
     return date;
+}
+
+/* =========================================================
+RESUMIR TAREAS
+========================================================= */
+function smartSummarize(text, maxWords = 4) {
+
+    if (!text) return "";
+
+    let processedText = text.toLowerCase();
+
+    const phraseReplacements = {
+        "programa de resultados electorales preliminares": "PREP",
+        "organismo público local electoral": "OPLE",
+        "organismo público local": "OPLE",
+        "resultados electorales preliminares": "PREP",
+        "infraestructura tecnológica": "Infraestructura",
+        "pruebas de caja negra": "Pruebas caja negra",
+        "plan de pruebas": "Plan pruebas",
+        "casos de uso": "Casos uso"
+    };
+
+
+    for (const phrase in phraseReplacements) {
+
+        processedText = processedText.replace(
+            phrase,
+            phraseReplacements[phrase]
+        );
+    }
+
+    // Si el texto ya es corto, no modificarlo
+    if (text.length <= 60) {
+        return text;
+    }
+
+    // Palabras poco importantes
+    const stopWords = new Set([
+        "de", "del", "la", "las", "los",
+        "para", "por", "con", "en",
+        "y", "el", "un", "una",
+        "a", "al", "que", "se",
+        "como", "sobre", "mediante",
+        "sus", "su", "es", "ser",
+        "consideren", "menos"
+    ]);
+
+    // Palabras o frases que queremos simplificar
+    const replacements = {
+        "proporcionarán": "Entrega",
+        "proporcionar": "Entrega",
+        "escritura": "",
+        "documento": "",
+        "documentación": "",
+        "organismo": "",
+        "electoral": "",
+        "proveedor": "",
+        "implementada": "",
+        "implementación": "Implementación",
+        "elaboración": "Elaboración",
+        "propuesta": "Propuesta",
+        "funcionalidad": "",
+        "sistema": "Sistema",
+        "información": "Información",
+        "auditoría": "Auditoría"
+    };
+    
+    let processed = text.toLowerCase();
+
+    for (const key in replacements) {
+        processed = processed.replace(
+            key,
+            replacements[key]
+        );
+    }
+
+    // Separar palabras
+    let words = processedText
+        .replace(/[.,;:()"]/g, "")
+        .split(/\s+/);
+
+    let result = [];
+
+    for (let word of words) {
+
+        const lower = word.toLowerCase();
+
+        // Ignorar palabras vacías
+        if (stopWords.has(lower)) continue;
+
+        // Aplicar reemplazos
+        if (lower in replacements) {
+
+            const replacement = replacements[lower];
+
+            if (replacement !== "") {
+                result.push(replacement);
+            }
+
+        } else {
+
+            result.push(word);
+        }
+
+        // Ya tenemos suficientes palabras
+        if (result.length >= maxWords) break;
+    }
+
+    let summary = result.join(" ");
+
+    if (summary.length < text.length) {
+        summary += "...";
+    }
+
+    console.log("================================");
+    console.log("Original :", text);
+    console.log("Resumen  :", summary);
+    console.log("================================");
+
+    return summary;
+
 }
 
 // -- Recortar textos largos --
@@ -294,6 +417,16 @@ document.addEventListener("DOMContentLoaded", () => {
                         "#"
                     ]);
 
+                    const taskName = getVal([
+                        "tarea",
+                        "Tarea",
+                        "task",
+                        "Task",
+                        "actividad"
+                    ]);
+
+                    console.log("taskName =", taskName);
+
                     return {
                         
                         // -- Generación de ID 
@@ -303,14 +436,10 @@ document.addEventListener("DOMContentLoaded", () => {
                             : (i + 1).toString(),
                         
                         // -- Datos principales --
-                        task: 
-                            getVal([
-                                "tarea", 
-                                "Tarea", 
-                                "task", 
-                                "Task",
-                                "actividad"
-                            ]),
+                         task: taskName,
+
+                        // Nombre resumido
+                        shortTask: smartSummarize(taskName),
                         
                         start: 
                             parseSpanishDate(
@@ -357,7 +486,9 @@ document.addEventListener("DOMContentLoaded", () => {
                                 "dep"
                             ]) || null
                     };
+                    
                 })
+                console.log(ganttData);
                 
                 // -- Validacion de datos --
                 ganttData = ganttData.filter(d =>
@@ -370,7 +501,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 );
 
                 // -- Render y guardado --
-
                 renderGantt(ganttData);
 
                 saveToLocalStorage();
@@ -425,6 +555,8 @@ function renderGantt(data) {
     setupTooltip(barRects);
 
     setupZoom();
+
+    syncScroll();
 
 }
 
@@ -578,15 +710,14 @@ function createTableContainer() {
 
     table = d3.select("#table-container")
         .append("svg")
-        .attr("width", 700) 
-        .attr("height", totalHeight) 
+        .attr("id", "table-svg")
+        .attr("height", totalHeight)
         .append("g")
         .attr("transform", `translate(20,${margin.top})`);
 }
 
 // -- Dibujar columnas y filas de la tabla 
 function drawTable(data) {
-
     // -- Columnas visibles seleccionadas por el usuario --
     const selectedColumns = exportColumns || [
         "id",
@@ -608,8 +739,8 @@ function drawTable(data) {
                 )
             )
         },
-        { key: "tarea", label: "Tarea", width: 180 },
-        { key: "responsable", label: "Responsable", width: 190 },
+        {key: "tarea", label: "Tarea", width: 500 },
+        { key: "responsable", label: "Responsable", width: 200 },
         { key: "estado", label: "Estado", width: 130 },
         { key: "dep", label: "Dep.", width: 90 }
     ];
@@ -622,10 +753,13 @@ function drawTable(data) {
     // -- Recalcular posiciones horizontales --
     let currentX = 0;
 
-    visibleColumns.forEach(col => {
-        col.x = currentX;
-        currentX += col.width;
-    });
+    visibleColumns.forEach(col => {
+        col.x = currentX;
+        currentX += col.width;
+    });
+
+    d3.select("#table-svg")
+        .attr("width", currentX + 40);
 
     // -- Expandir ancho de tarea si es la única columna visible --
     if (
@@ -669,28 +803,37 @@ function drawTable(data) {
             .text(d => d.id);
     }
 
-    // TAREA
-    if (selectedColumns.includes("tarea")) {
+    // TAREA
+    if (selectedColumns.includes("tarea")) {
 
-        tableRows.append("text")
-            .attr("x", visibleColumns.find(c => c.key === "tarea").x)
-            .attr("y", d => y(d.task) + y.bandwidth() / 2)
-            .attr("dominant-baseline", "middle")
-            .text(d => {
+        tableRows.append("text")
+            .attr("x", visibleColumns.find(c => c.key === "tarea").x)
+            .attr("y", d => y(d.task) + y.bandwidth() / 2)
+            .attr("dominant-baseline", "middle")
+            .text(d => {
 
-                if (selectedColumns?.length < 5) {
-                    return d.task;
-                }
+                // Si no existe un resumen, usar el nombre completo
+                if (!d.shortTask) {
+                    return d.task;
+                }
 
-                return truncateText(d.task, 20);
-            });
-    }
+                // Si la tarea ya es corta, no resumir
+                if (d.task.length <= 45) {
+                    return d.task;
+                }
+
+                // Mostrar el resumen inteligente
+                return d.shortTask;
+            })
+            .append("title")
+            .text(d => d.task); // Tooltip con el nombre completo
+    }
 
     // RESPONSABLE
     if (selectedColumns.includes("responsable")) {
 
         tableRows.append("text")
-            .attr("x", visibleColumns.find(c => c.key === "responsable").x)
+            .attr("x", visibleColumns.find(c => c.key === "responsable").x +5)
             .attr("y", d => y(d.task) + y.bandwidth() / 2)
             .attr("dominant-baseline", "middle")
             .text(d => d.responsable || "");
@@ -1490,7 +1633,7 @@ function openExportModal(format) {
                     200,
                     d3.max(ganttData, d =>
                         measureText(d.responsable || "")
-                    ) + 40
+                    ) + 80
                 )
         },
         {
@@ -1539,6 +1682,37 @@ function openExportModal(format) {
     });
 
     modal.classList.remove("hidden");
+
+    //Para descarga de tareas completas o resumen
+    if (exportColumns.includes("tarea")) {
+
+        container.innerHTML += `
+            <hr style="margin:15px 0">
+
+            <label style="font-weight:bold">
+                Mostrar tareas:
+            </label>
+
+            <label style="display:block;margin-top:8px">
+                <input
+                    type="radio"
+                    name="taskMode"
+                    value="summary"
+                    checked
+                >
+                Resumidas
+            </label>
+
+            <label style="display:block">
+                <input
+                    type="radio"
+                    name="taskMode"
+                    value="full"
+                >
+                Completas
+            </label>
+        `;
+    }
 }
 
 async function processExport() {
@@ -1564,6 +1738,14 @@ async function processExport() {
         .getElementById("export-modal")
         .classList.add("hidden");
 
+    const selectedMode =
+        document.querySelector(
+            "input[name='taskMode']:checked"
+        );
+
+        if (selectedMode) {
+            exportTaskMode = selectedMode.value;
+        }
     renderGantt(ganttData);
 
     await generateExport(exportFormat);
@@ -1576,9 +1758,7 @@ async function processExport() {
 async function generateExport(format) {
     const temp = document.createElement("div");
     temp.className = "export-temp";
-    temp.innerHTML = `
-        <div id="temp-wrapper"></div>
-    `;
+    temp.innerHTML = `<div id="temp-wrapper"></div>`;
 
     document.body.appendChild(temp);
 
@@ -1586,85 +1766,87 @@ async function generateExport(format) {
     const clone = document.getElementById("gantt-wrapper").cloneNode(true);
     wrapper.appendChild(clone);
 
-    // Obtener los SVGs originales
-    const originalTable = document.querySelector("#table-container svg");
-    const originalGantt = document.querySelector("#gantt-container svg");
-
+    // Obtener las referencias del DOM clonado y del Gantt original
+    const originalGanttSvg = document.querySelector("#gantt-container svg");
     const exportSvgContainer = clone.querySelector("#table-container");
-    exportSvgContainer.innerHTML = originalTable.outerHTML;
-    const exportSvg = exportSvgContainer.querySelector("svg");
+    const exportSvg = exportSvgContainer ? exportSvgContainer.querySelector("svg") : null;
 
-    const dynamicFontSize =
-    exportColumns.length <= 2 ? 18 :
-    exportColumns.length === 3 ? 15 :
-    13;
-
-    // 1. DEFINIR MAPEO DE TODAS LAS COLUMNAS POSIBLES Y SUS ANCHOS DINÁMICOS
+    // 1. CONFIGURACIÓN BASE DE COLUMNAS CON SUS PESOS/ANCHOS DESEADOS
     const allConfigColumns = [
-        { key: "id", label: "ID", width: 60 },
-        {
-            key: "tarea",
-            label: "Tarea",
-            width: Math.max(260, d3.max(ganttData, d => measureText(
-                        d.task || d.tarea || "",
-                        dynamicFontSize
-                    )
-                ) + 60
-            )
-        },
-        {
-            key: "responsable",
-            label: "Responsable",
-            width: Math.max(220, d3.max(ganttData, d => measureText(d.responsable || "")) + 40)
-        },
-        { key: "estado", label: "Estado", width: 150 },
-        { key: "dep", label: "Dep.", width: 100 }
+        { key: "id", label: "ID", width: 55 },
+        { key: "tarea", label: "Tarea", width: 260 },
+        { key: "responsable", label: "Responsable", width: 130 },
+        { key: "estado", label: "Estado", width: 100 },
+        { key: "dep", label: "Dep.", width: 80 }
     ];
 
-    // 2. FILTRAR SÓLO LAS COLUMNAS QUE EL USUARIO SELECCIONÓ
-    // exportColumns contiene los valores checados (ej: ['id', 'tarea', 'estado'])
+    // ANCHO FIJO DESEADO PARA EL ÁREA DE LA TABLA EN EL EXPORT (Suma original ~625px)
+    const TARGET_TABLE_WIDTH = 625; 
+    const marginLeft = 15;
+    const paddingRight = 15;
+    const availableWidth = TARGET_TABLE_WIDTH - marginLeft - paddingRight;
+
+    // 2. FILTRAR Y CALCULAR ANCHOS/POSICIONES DINÁMICAS (EXPANDIBLES)
     const activeColumns = allConfigColumns.filter(col => exportColumns.includes(col.key));
 
-    // 3. CALCULAR COORDENADAS 'X' REALES PARA LAS COLUMNAS ACTIVAS
-    let currentX = 20; // Margen izquierdo inicial
-    activeColumns.forEach(col => {
-        col.x = currentX;
-        currentX += col.width;
-    });
+    if (activeColumns.length > 0) {
+        // Asignamos anchos dinámicos si la columna "tarea" está presente para que absorba el espacio sobrante,
+        // o distribuimos proporcionalmente entre las visibles.
+        const fixedColsWidth = activeColumns
+            .filter(c => c.key !== "tarea")
+            .reduce((acc, c) => acc + c.width, 0);
 
-    const totalTableWidth = currentX; // Ancho final que ocupará la tabla
+        let currentX = marginLeft;
 
-    // 4. RE-RENDERIZAR EN EL SVG CLONADO SÓLO LO SELECCIONADO
+        activeColumns.forEach(col => {
+            col.x = currentX;
 
-    const d3ExportSvg = d3.select(exportSvg);
+            if (col.key === "tarea") {
+                // Si la columna es "Tarea", le asignamos todo el ancho restante disponible
+                col.computedWidth = Math.max(col.width, availableWidth - fixedColsWidth);
+            } else {
+                col.computedWidth = col.width;
+            }
 
-    // Vaciamos el SVG clonado para armarlo de forma limpia y exacta
-    d3ExportSvg.html("");
+            currentX += col.computedWidth;
+        });
+    }
 
-    let fontSize;
-    let headerFontSize;
-    let rowHeight;
+    // El ancho total de la tabla siempre será constante
+    const totalTableWidth = TARGET_TABLE_WIDTH;
+
+    // Configuración de tamaños de fuente
+    let fontSize = 12;
+    let headerFontSize = 13;
+    let rowHeight = 40;
 
     if (activeColumns.length <= 2) {
-
-        // Pocas columnas 
-        fontSize = 25;
-        headerFontSize = 20;
-        rowHeight = 55;
-
-    } else if (activeColumns.length === 3) {
-
-        fontSize = 20;
-        headerFontSize = 17;
+        fontSize = 14;
+        headerFontSize = 15;
         rowHeight = 45;
-
-    } else {
-
-        // Muchas columnas → fuente normal
-        fontSize = 17;
-        headerFontSize = 16;
-        rowHeight = 40;
     }
+
+    // 3. CALCULAR ALTURA REAL DEL COMPONENTE
+    let realTotalHeight = 0;
+    if (originalGanttSvg) {
+        realTotalHeight = originalGanttSvg.getBoundingClientRect().height;
+    }
+    if (!realTotalHeight || realTotalHeight < 200) {
+        realTotalHeight = margin.top + (ganttData.length * rowHeight) + 80;
+    }
+
+    // 4. DIBUJAR LA TABLA EN EL SVG CLONADO
+    const d3ExportSvg = d3.select(exportSvg);
+    d3ExportSvg.html("");
+
+    d3ExportSvg
+        .attr("width", totalTableWidth)
+        .attr("height", realTotalHeight)
+        .attr("viewBox", `0 0 ${totalTableWidth} ${realTotalHeight}`)
+        .style("width", `${totalTableWidth}px`)
+        .style("min-width", `${totalTableWidth}px`)
+        .style("height", `${realTotalHeight}px`)
+        .style("overflow", "visible");
 
     // Renderizar Encabezados
     const headerY = 30; 
@@ -1679,59 +1861,109 @@ async function generateExport(format) {
             .text(col.label);
     });
 
-    const firstRowY = margin.top + (y.bandwidth() / 2);
-
-    ganttData.forEach((row, i) => {
-        const rowY =
-            margin.top +
-            y(row.task) +
-            y.bandwidth() / 2;
+    // Renderizar Filas
+    ganttData.forEach((row) => {
+        const rowY = margin.top + y(row.task) + y.bandwidth() / 2;
 
         activeColumns.forEach(col => {
             let val = "";
             
-            // Mapeo seguro de variables de tu dataset
-            if (col.key === "id") val = row.id;
-            else if (col.key === "tarea") val = row.task || row.tarea || "";
-            else if (col.key === "responsable") val = row.responsable || "";
-            else if (col.key === "estado") val = row.estado || "Pendiente";
-            else if (col.key === "dep") val = row.dependsOn || row.dep || "";
+            if (col.key === "id") {
+                val = row.id ?? "";
+            } else if (col.key === "tarea") {
+                val = (exportTaskMode === "summary") ? (row.shortTask || row.task) : row.task;
+                
+                // Recorte dinámico según el ancho calculado de la columna tarea
+                const maxChars = Math.floor(col.computedWidth / 8); 
+                if (val.length > maxChars) {
+                    val = val.substring(0, maxChars - 3) + "...";
+                }
+            } else if (col.key === "responsable") {
+                val = row.responsable || row.responsible || "------";
+            } else if (col.key === "estado") {
+                val = row.estado || row.status || "Pendiente";
+            } else if (col.key === "dep") {
+                const depVal = row.dependsOn ?? row.dep ?? row.dependencia ?? row.dependencies;
+                val = (depVal !== undefined && depVal !== null && depVal !== "") ? depVal : "-";
+            }
 
             d3ExportSvg.append("text")
                 .attr("x", col.x)
-                
                 .attr("y", rowY)
                 .attr("dominant-baseline", "middle")
                 .style("font-family", "Arial, Helvetica, sans-serif")
                 .style("font-size", `${fontSize}px`)
                 .style("fill", "#555")
-                .text(val);
+                .text(String(val));
         });
     });
 
-    // 5. ASIGNAR EL ANCHO REAL AL SVG DE LA TABLA
-    exportSvg.setAttribute("width", totalTableWidth);
-    exportSvgContainer.style.width = `${totalTableWidth}px`;
+    // 5. AJUSTAR ANCHOS Y ALTURAS EN EL LAYOUT CLONADO
+    const ganttWidth = originalGanttSvg ? originalGanttSvg.getBoundingClientRect().width : 800;
+    const totalWrapperWidth = totalTableWidth + ganttWidth;
 
-    // 6. ACOPLAR EL GRÁFICO DE GANTT AL LADO DE LA TABLA
-    clone.querySelector("#gantt-container").innerHTML = originalGantt.outerHTML;
-    clone.querySelector("#gantt-scroll").style.overflow = "visible";
+    if (exportSvgContainer) {
+        exportSvgContainer.style.setProperty("width", `${totalTableWidth}px`, "important");
+        exportSvgContainer.style.setProperty("min-width", `${totalTableWidth}px`, "important");
+        exportSvgContainer.style.setProperty("max-width", `${totalTableWidth}px`, "important");
+        exportSvgContainer.style.setProperty("flex", `0 0 ${totalTableWidth}px`, "important");
+        exportSvgContainer.style.setProperty("height", `${realTotalHeight}px`, "important");
+        exportSvgContainer.style.setProperty("overflow", "visible", "important");
+    }
 
-    // Esperar a que se asiente el DOM antes de la captura
+    const exportGanttContainer = clone.querySelector("#gantt-container");
+    if (exportGanttContainer) {
+        exportGanttContainer.style.setProperty("width", `${ganttWidth}px`, "important");
+        exportGanttContainer.style.setProperty("min-width", `${ganttWidth}px`, "important");
+        exportGanttContainer.style.setProperty("flex", `0 0 ${ganttWidth}px`, "important");
+        exportGanttContainer.style.setProperty("height", `${realTotalHeight}px`, "important");
+        exportGanttContainer.style.setProperty("overflow", "visible", "important");
+    }
+
+    // Ajustes en el wrapper principal
+    clone.style.setProperty("display", "flex", "important");
+    clone.style.setProperty("flex-direction", "row", "important");
+    clone.style.setProperty("width", `${totalWrapperWidth}px`, "important");
+    clone.style.setProperty("min-width", `${totalWrapperWidth}px`, "important");
+    clone.style.setProperty("height", `${realTotalHeight}px`, "important");
+    clone.style.setProperty("max-width", "none", "important");
+    clone.style.setProperty("overflow", "visible", "important");
+
+    wrapper.style.setProperty("width", `${totalWrapperWidth}px`, "important");
+    wrapper.style.setProperty("height", `${realTotalHeight}px`, "important");
+    wrapper.style.setProperty("max-width", "none", "important");
+    wrapper.style.setProperty("overflow", "visible", "important");
+
+    // Desactivar scrollbars en los elementos contenedores
+    const ganttScroll = clone.querySelector("#gantt-scroll");
+    const tableScroll = clone.querySelector("#table-scroll");
+    if (ganttScroll) {
+        ganttScroll.style.setProperty("overflow", "visible", "important");
+        ganttScroll.style.setProperty("height", `${realTotalHeight}px`, "important");
+    }
+    if (tableScroll) {
+        tableScroll.style.setProperty("overflow", "visible", "important");
+        tableScroll.style.setProperty("height", `${realTotalHeight}px`, "important");
+    }
+
     await new Promise(r => setTimeout(r, 400));
 
-    // 7. CAPTURA CON HTML2CANVAS
-    const canvas = await html2canvas(temp, {
-        scale: 3, // Alta calidad
+    // 6. CAPTURA DE PANTALLA COMPLETA
+    const captureHeight = clone.scrollHeight || realTotalHeight;
+
+    const canvas = await html2canvas(clone, {
+        scale: 2,
         useCORS: true,
         backgroundColor: "#ffffff",
         scrollX: 0,
         scrollY: 0,
-        width: temp.scrollWidth,
-        height: temp.scrollHeight
+        width: totalWrapperWidth,
+        height: captureHeight,
+        windowWidth: totalWrapperWidth,
+        windowHeight: captureHeight
     });
 
-    // 8. PROCESAR DESCARGA (Imagen o PDF)
+    // 7. EXPORTAR FORMATO (PNG / JPEG / PDF)
     if (format === "png" || format === "jpeg") {
         const link = document.createElement("a");
         link.download = getExportFileName(format);
@@ -1739,9 +1971,7 @@ async function generateExport(format) {
         link.click();
     } 
     else if (format === "pdf") {
-
         const { jsPDF } = window.jspdf;
-
         const pdf = new jsPDF({
             orientation: "landscape",
             unit: "px",
@@ -1750,59 +1980,48 @@ async function generateExport(format) {
 
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const pdfHeight = pdf.internal.pageSize.getHeight();
+        const pdfMargin = 15;
 
-        const scale = pdfWidth / canvas.width;
+        const usablePdfWidth = pdfWidth - pdfMargin * 2;
+        const usablePdfHeight = pdfHeight - pdfMargin * 2;
+        const scale = usablePdfWidth / canvas.width;
 
         const pageCanvas = document.createElement("canvas");
         const pageCtx = pageCanvas.getContext("2d");
 
         pageCanvas.width = canvas.width;
-        pageCanvas.height = pdfHeight / scale;
+        pageCanvas.height = usablePdfHeight / scale;
 
-        let y = 0;
+        let yOffset = 0;
         let first = true;
 
-        while (y < canvas.height) {
-
-            pageCtx.clearRect(
-                0,
-                0,
-                pageCanvas.width,
-                pageCanvas.height
-            );
-
+        while (yOffset < canvas.height) {
+            pageCtx.clearRect(0, 0, pageCanvas.width, pageCanvas.height);
             pageCtx.drawImage(
                 canvas,
-                0,
-                y,
-                canvas.width,
-                pageCanvas.height,
-                0,
-                0,
-                canvas.width,
-                pageCanvas.height
+                0, yOffset, canvas.width, pageCanvas.height,
+                0, 0, canvas.width, pageCanvas.height
             );
 
-            if (!first)
-                pdf.addPage();
+            if (!first) pdf.addPage();
 
             pdf.addImage(
                 pageCanvas.toDataURL("image/png"),
                 "PNG",
-                0,
-                0,
-                pdfWidth,
+                pdfMargin,
+                pdfMargin,
+                usablePdfWidth,
                 pageCanvas.height * scale
             );
 
-            y += pageCanvas.height;
+            yOffset += pageCanvas.height;
             first = false;
         }
 
         pdf.save(getExportFileName("pdf"));
     }
 
-    // Limpieza
+    // 8. LIMPIEZA
     document.body.removeChild(temp);
 }
 
@@ -2029,6 +2248,41 @@ function loadFromLocalStorage() {
 }
 
 /* =========================================================
+FUNCION  PARA EL SCROLL VERTICAL COMPARTIDO
+========================================================= */
+function syncScroll() {
+
+    const tableScroll = document.getElementById("table-scroll");
+    const ganttScroll = document.getElementById("gantt-scroll");
+
+    let syncing = false;
+
+    tableScroll.addEventListener("scroll", () => {
+
+        if (syncing) return;
+
+        syncing = true;
+
+        ganttScroll.scrollTop = tableScroll.scrollTop;
+
+        syncing = false;
+    });
+
+    ganttScroll.addEventListener("scroll", () => {
+
+        if (syncing) return;
+
+        syncing = true;
+
+        tableScroll.scrollTop = ganttScroll.scrollTop;
+
+        syncing = false;
+    });
+
+}
+
+
+/* =========================================================
 BOTON PARA BORRAR EL PROYECTO
 ========================================================= */
 async function clearProject() {
@@ -2087,8 +2341,6 @@ async function clearProject() {
     console.log("Proyecto eliminado");
 
 }
-
-
 
 /* =========================================================
 PROYECTOS CON COMILLAS EN EL NOMBRE 
